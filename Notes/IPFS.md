@@ -36,3 +36,25 @@ IPFS is fundamentally a mechanism for retrieving containers called __IPFS object
   * a name (the name of the link)
   * the hash of the IPFS object that the link points to
   * the cumulative size of the linked IPFS objects, following its links.
+
+In IPFS, every data blob that is greater than 256kB in size gets broken down into a parent IPFS object, which contains links to blobs of data that makeup the original data blob; it also contains some minimal data that says that the IPFS object represents a large file.
+
+Furthermore, you can use the same kind of structure, to represent directories; the links contain names of files or other directories, and they themselves are represented as IPFS objects.
+
+No matter where an IPFS object is referenced, as long as it has the same content, it also has the same content hash; this means that it doesn't matter where the file is stored or how it is logically organised in terms of it's directory structure.
+
+so the ipfs command line tool can treet any of these objects as the root object, and then traverse the root object like any filesystem, no matter where the files behind the root object are actually stored. All files that have the same content hash are resolved to the same thing. THis is called __deduplication__.
+
+#Concerns
+IPFS breaks down all its content into blobs of data 256kB or less. When we hash the content, we will need IPFS to combine all the data, into a blob; we hash the package blob, and when we decompress it, we can perhaps share identitical components across packages. So for instance, we may not even need to hash the whole file 
+
+* Seperate filesystems
+* Naming systems
+* Deduplication (block deduplication)
+* Reserve node issue (preserving packages)
+* ^^And removing old packages...
+* FFI from haskell/elixir
+
+* Nested Deduplication at the package, file system level; advantages?
+
+    
