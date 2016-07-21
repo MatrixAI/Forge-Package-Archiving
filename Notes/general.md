@@ -48,12 +48,23 @@ so the ipfs command line tool can treet any of these objects as the root object,
 #Concerns
 IPFS breaks down all its content into blobs of data 256kB or less. When we hash the content, we will need IPFS to combine all the data, into a blob; we hash the package blob, and when we decompress it, we can perhaps share identitical components across packages. So for instance, we may not even need to hash the whole file 
 
-* Seperate filesystems
-* Naming systems
-* Deduplication (block deduplication)
-* Reserve node issue (preserving packages)
-* ^^And removing old packages...
-* FFI from haskell/elixir
+##Seperate filesystems
+The forge package archiving system should be able to support packages stored in multiple formats; for example, packages in tar.gz format, or packages that are obtained from a git repository in source format. Will the forge package archiving have support for building the package? 
+##Semantic labelling of packages
+Although, under the IPFS system, packages will be addressed by their content hash, similar to how nixOS addresses packages in its nix store, we will also want to label packages by version; i.e. we want to provide a mechanism for allowing developers to assign mutable names to specific packages. This means that users can address packages through their semantic name rather than their content hash. Probably the simplest way to do this is to keep a seperate database of package names/versions, and resolve them to their content hash in the system...
+
+Furthermore, we will probably want to provide multiple index keys to our packages. So we can index by version number, latest names, etc; there should be no requirement that a package have only one key that can be used to address that package.
+
+We will also want to look into the application of IPNS in particular; perhaps it can help with the requirement to address packages without having to write our own method of addressing.
+##Deduplication (block deduplication)
+##Reserve node issue (preserving packages)
+It is necessary to ensure that people who participate in our IPFS package network are guaranteed that any package they upload will be stored permanently in the network. For this purpose, we suggest that there will be a reserve node that will serve to store all packages uploaded to the forge package archive IPFS; normal access will happen through traditional distributed method, but having a reserve node ensures that a package cannot disappear from the network. It is still to be determined whether the reserve node will crawl the IPFS network periodically to ensure that all packages added to the IPFS are still available, or whether the tracking of new packages will happen through the Forge package archiving tool when the package is uploaded to the network.
+
+Further inspiration for preserving packages could come from FileCoin, a cryptocurrency based on file storage. The white paper on FileCoin mentions a "proof-of-retrievability" component, which could come in handy. Link [here](http://filecoin.io/filecoin.pdf)
+
+##Removal of old packages
+After a period of time, their should be a tool that maintains the IPFS network to remove old packages (or at least mark them as unsupported. At the most basic level, this could occur by removing these packages from the reserve node based on a specific list of criteria i.e. age, ....)
+FFI from haskell/elixir
 
 * Nested Deduplication at the package, file system level; advantages?
 
