@@ -1,0 +1,4 @@
+#Introduction
+Forge-Package-Archiving is an attempt to combine the ideas behind IPFS and Content Addressable Storage to create a permanent, verifiable package store; packages and their compressed states are hashed and stored according to their hash; when we build software using these packages, we can guarantee that if the hashes of all the dependencies and tools used to build the software are the same, then the program output will also be the same. Furthermore, creating our own package directory allows us to experiment with optimal ways to store dependencies in a content addressable manner, and also serves as a package-cache on existing packages in say, the python packaging system that allows us to retrieve packages based on the content of a package already listed on the python package index.
+
+
