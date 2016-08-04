@@ -1,4 +1,4 @@
-import Crypto.Hash (hashInitWith, SHA256(..), Digest(..), Context(..), hashUpdate)
+import Crypto.Hash (hashInitWith, SHA256(..), Digest(..), Context(..), hashUpdate, hashFinalize)
 import Control.Monad.IO.Class (liftIO)
 import Data.Conduit (yield, await, Source, Conduit, Sink, ($$), (=$))
 import qualified Data.ByteString.Char8 as ByteS (ByteString, pack, length) 
@@ -11,25 +11,22 @@ source = do
   yield $ ByteS.pack "ab"
   yield $ ByteS.pack "abc"
 
---conduit h ::  Conduit ByteS.ByteString IO (Context SHA256)
---conduit = do 
---  mbs <- await
---  case mbs of
---    Just bs -> do
---      yield $ (hashUpdate hContext bs)
---      conduit
---    Nothing -> return ()
-
-sink :: (Context SHA256) -> Sink ByteS.ByteString IO ()
-sink h = do
+conduit :: (Context SHA256) -> Conduit ByteS.ByteString IO (Digest SHA256)
+conduit hc = do 
   mbs <- await
   case mbs of
     Just bs -> do
-      context <- hashUpdate h bs
-      sink context
+      conduit $ hashUpdate hc bs 
     Nothing -> do
-      digest <- hashFinalize h
-      liftIO $ print $ show digest
-      return () 
+      yield $ hashFinalize hc
 
-main = source =$ sink hContext
+sink :: Sink (Digest SHA256) IO ()
+sink = do
+  mDigest <- await
+  case mDigest of
+    Just digest -> do
+      liftIO $ print $ show digest
+    Nothing -> do
+      liftIO $ print "No Digest"
+
+main = source $$ conduit hContext =$ sink
