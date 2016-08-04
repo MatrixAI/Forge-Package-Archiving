@@ -1,26 +1,22 @@
-import Crypto.Hash
-import Data.ByteString.Char8 as C 
-import Crypto.Hash.Algorithms
-import Control.Monad.IO.Class
-import Data.Conduit.Binary as B
-import Data.Conduit
-import Control.Monad.Trans.Resource
+import Control.Monad.IO.Class (liftIO)
+import Data.Conduit (yield, Source, Conduit, Sink)
+import qualified Data.ByteString as ByteS (ByteString, pack, length) 
 
 --Initialise a hashing context
-hContext = hashInitWith SHA256
+--hContext = hashInitWith SHA256
 
-source :: Source IO ByteString
+source :: Source IO ByteS.ByteString
 source = do
-  yield $ pack "mystring1"
-  yield $ pack "mystring23"
-  yield $ pack "mystring323489y0uijlknazfsd"
+  yield $ ByteS.pack "mystring1"
+  yield $ ByteS.pack "mystring23"
+  yield $ ByteS.pack "mystring323489y0uijlknazfsd"
 
-conduit :: Conduit ByteString IO Int 
+conduit :: Conduit ByteS.ByteString IO Int 
 conduit = do 
   mbs <- await
   case mbs of
     Just bs -> do
-      yield $ C.length bs
+      yield $ ByteS.length bs
       conduit
     Nothing -> return ()
 
