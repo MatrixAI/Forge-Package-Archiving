@@ -5,17 +5,20 @@ import Data.Conduit.Binary (sinkFile)
 import Network.HTTP.Conduit (parseRequest, tlsManagerSettings, newManager, http, responseBody)
 import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
 import Control.Monad.Trans.Class (lift)
-import qualified Data.ByteString.Char8 as ByteS (ByteString, pack) 
+import qualified Data.Bytestring.Lazy as ByteS (ByteString, pack, length) 
 
---download a binary file and produce a source
+-- benchmarking library
+import Criterion.Main
+
+--download a binary file and produce a resumableSource
 --
 main = do
-  request <- parseRequest "GET https://aur.archlinux.org/cgit/aur.git/snapshot/pacman-static.tar.gz"
+  request <- parseRequest "http://speedtest.ftp.otenet.gr/files/test1Gb.db"
   manager <- newManager tlsManagerSettings
   runResourceT $ do
     response <- http request manager 
     -- responseBody response $$+- hashSink hContext 
-    responseBody response $$+- sinkFile "test.tar.gz"
+    responseBody response $$+- sinkFile "test"
     liftIO $ print "Done"
     
 --Initialise a hashing context
@@ -35,6 +38,7 @@ hashSink hc = do
   case mbs of
     Just bs -> do
       hashSink $ hashUpdate hc bs 
+      liftIO $ print $ bs.length 
     Nothing -> do
       let digest = hashFinalize hc
       liftIO $ print $ show digest
