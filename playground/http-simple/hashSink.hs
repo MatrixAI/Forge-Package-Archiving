@@ -1,7 +1,10 @@
 import Crypto.Hash (hashInitWith, SHA256(..), Digest(..), Context(..), hashUpdate, hashFinalize)
 import Control.Monad.IO.Class (liftIO)
-import Data.Conduit (yield, await, Source, Conduit, Sink, ($$))
-import Network.HTTP.Conduit (parseRequest, tlsManagerSettings, newManager, http)
+import Data.Conduit (yield, await, Source, Conduit, Sink, ($$), ($$+-))
+import Data.Conduit.Binary (sinkFile)
+import Network.HTTP.Conduit (parseRequest, tlsManagerSettings, newManager, http, responseBody)
+import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
+import Control.Monad.Trans.Class (lift)
 import qualified Data.ByteString.Char8 as ByteS (ByteString, pack) 
 
 --download a binary file and produce a source
@@ -9,9 +12,12 @@ import qualified Data.ByteString.Char8 as ByteS (ByteString, pack)
 main = do
   request <- parseRequest "GET https://aur.archlinux.org/cgit/aur.git/snapshot/pacman-static.tar.gz"
   manager <- newManager tlsManagerSettings
-  response <- http request manager
+  runResourceT $ do
+    response <- http request manager 
+    -- responseBody response $$+- hashSink hContext 
+    responseBody response $$+- sinkFile "test.tar.gz"
+    liftIO $ print "Done"
     
-  print "Done"
 --Initialise a hashing context
 hContext = hashInitWith SHA256
 
@@ -23,14 +29,15 @@ testSource = do
   yield $ ByteS.pack "abc"
 
 --receive bytestrings from upstream, and update hashing context
-sink :: (Context SHA256) -> Sink ByteS.ByteString IO (Digest SHA256)
-sink hc = do
+hashSink :: (Context SHA256) -> Sink ByteS.ByteString (ResourceT IO) ()
+hashSink hc = do
   mbs <- await
   case mbs of
     Just bs -> do
-      sink $ hashUpdate hc bs 
+      hashSink $ hashUpdate hc bs 
     Nothing -> do
-      return $ hashFinalize hc
+      let digest = hashFinalize hc
+      liftIO $ print $ show digest
 
 -- digest = testSource $$ sink hContext
 
