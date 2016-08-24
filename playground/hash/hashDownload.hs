@@ -19,7 +19,7 @@ import qualified Data.ByteString.Char8 as ByteS (ByteString, pack, length)
 hSHA256 = hashInitWith SHA256
 
 main = do
-  streamHash "http://mirror.internode.on.net/pub/test/10meg.test" "testFile"
+  streamHash "http://mirror.internode.on.net/pub/test/100meg.test" "testFile"
 
 --download a binary file and produce a resumableSource
 --streams at variable chunk sizes
