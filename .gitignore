@@ -1,0 +1,7 @@
+/playground/hash/testFile
+*.swp
+*.swo
+*.o
+*.hi
+*.hp
+*.prof

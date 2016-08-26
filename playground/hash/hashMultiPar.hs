@@ -4,19 +4,20 @@
 import Crypto.Hash (hashInitWith, HashAlgorithm, Digest(..), Context(..), hashUpdate, hashFinalize, 
   SHA256(..), MD5(..))
 
-import Control.Monad.IO.Class (liftIO)
 import Data.Conduit (yield, await, Source, Conduit, Sink, ($$+-), ($=+))
 import Data.Conduit.Binary (sinkFile)
 import Network.HTTP.Conduit (parseRequest, tlsManagerSettings, newManager, http, responseBody)
-import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
 
 import Control.Concurrent (rtsSupportsBoundThreads, getNumCapabilities, setNumCapabilities)
 import GHC.Conc (getNumProcessors) 
+
 import qualified Data.ByteString.Char8 as ByteS (ByteString, pack, length) 
 
---import Control.Parallel.Strategies (parList, rdeepseq, using)
-import Control.Parallel.Strategies (parMap, rpar)
+import Control.Parallel.Strategies (parMap, rpar, rseq, rdeepseq)
+import Control.DeepSeq (NFData(..), force)
 import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
 
 -- benchmarking library for timing
 -- import Criterion.Main
@@ -24,6 +25,7 @@ import Control.Monad (when)
 -- quick data class to pack instances of context into
 -- data HashesToBeComputed = ContextMD5 (Context MD5) | ContextSHA256 (Context SHA256)
 data Contextable = forall h. (HashAlgorithm h) => Contextable (Context h) 
+instance NFData Contextable where rnf (Contextable ctx) = rnf ctx 
 data Digestable = forall h. (HashAlgorithm h) => Digestable (Digest h)
 
 --Initialise a hashing context
@@ -52,16 +54,15 @@ streamMultiHash contexts url file = do
 --get bs from upstream, update context, yield bs downstream
 --when all byte strings consumed, print the hash
 hashC :: [Contextable] -> Conduit ByteS.ByteString (ResourceT IO) (ByteS.ByteString)
-hashC !contexts = do
+hashC !ctxlist = do
   mbs <- await
   case mbs of
     Just bs -> do 
       yield bs
-      let newcontexts = parMap rpar (\(Contextable hc) -> Contextable (hashUpdate hc bs)) contexts 
-      hashC newcontexts 
+      hashC $ parMap rdeepseq (\(Contextable ctx) -> Contextable (hashUpdate ctx bs)) $ ctxlist
     Nothing -> do
-      let digests = map (\(Contextable hc) -> Digestable (hashFinalize hc)) contexts 
-      liftIO $ print $ map (\(Digestable d) -> show d) digests 
+      let digestable = map (\(Contextable ctx) -> Digestable (hashFinalize ctx)) $ ctxlist
+      liftIO $ print $ map (\(Digestable digest) -> show digest) $ digestable
 
 --test stream some bytestrings as source to sink
 testSource :: Source IO ByteS.ByteString
