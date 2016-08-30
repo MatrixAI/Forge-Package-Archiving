@@ -74,5 +74,5 @@ main = do
 --when rtsSupportsBoundThreads $ getNumProcessors >>= setNumCapabilities 
   chunkSize <- fmap (!! 0) getArgs 
   print chunkSize
-  streamMultiHash (mkManagerSettings (read chunkSize :: Int)) [hSHA256, hMD5] "http://mirror.internode.on.net/pub/test/100meg.test" "testFile" 
+  streamMultiHash (mkManagerSettings (read chunkSize :: Int)) [hSHA256, hMD5] "http://localhost:80" "testFile" 
 

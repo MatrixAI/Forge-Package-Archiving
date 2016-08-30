@@ -1,7 +1,10 @@
+*/bin/*
 /playground/hash/testFile
+/playground/hash/downloadFile
 *.swp
 *.swo
 *.o
 *.hi
 *.hp
 *.prof
+
