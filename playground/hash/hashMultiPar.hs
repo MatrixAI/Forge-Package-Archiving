@@ -37,7 +37,6 @@ hMD5 = Contextable $ hashInitWith MD5
 
 main = do
 --when rtsSupportsBoundThreads $ getNumProcessors >>= setNumCapabilities 
-      
   streamMultiHash [hSHA256, hMD5] "http://mirror.internode.on.net/pub/test/100meg.test" "testFile" 
 
 --download a binary file and produce a resumableSource
@@ -45,7 +44,10 @@ main = do
 streamMultiHash :: [Contextable] -> String -> FilePath -> IO ()
 streamMultiHash contexts url file = do
   request <- parseRequest url 
-  manager <- newManager tlsManagerSettings
+  --configure manager with chunksize 4096
+  let config = fmap (\f -> f 16536) $ rawConnectionModifySocketSize (const $ return())
+  manager <- newManager $ tlsManagerSettings { managerRawConnection = config }
+
   runResourceT $ do
     response <- http request manager 
     responseBody response $=+ hashC contexts $$+- sinkFile file 
