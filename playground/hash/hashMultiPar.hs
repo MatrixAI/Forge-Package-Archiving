@@ -6,10 +6,12 @@ import Crypto.Hash (hashInitWith, HashAlgorithm, Digest(..), Context(..), hashUp
 
 import Data.Conduit (yield, await, Source, Conduit, Sink, ($$+-), ($=+))
 import Data.Conduit.Binary (sinkFile)
-import Network.HTTP.Conduit (parseRequest, tlsManagerSettings, newManager, http, responseBody)
+import Network.HTTP.Conduit (parseRequest, newManager, tlsManagerSettings, http, responseBody)
+import Network.HTTP.Client (ManagerSettings(..), rawConnectionModifySocketSize)
 
 import Control.Concurrent (rtsSupportsBoundThreads, getNumCapabilities, setNumCapabilities)
 import GHC.Conc (getNumProcessors) 
+import System.Environment (getArgs)
 
 import qualified Data.ByteString.Char8 as ByteS (ByteString, pack, length) 
 
@@ -31,27 +33,22 @@ data Digestable = forall h. (HashAlgorithm h) => Digestable (Digest h)
 --Initialise a hashing context
 hSHA256 = Contextable $ hashInitWith SHA256 
 hMD5 = Contextable $ hashInitWith MD5 
-  
--- parallel map
---pmap f xs = map f xs `using` parList rdeepseq
 
-main = do
---when rtsSupportsBoundThreads $ getNumProcessors >>= setNumCapabilities 
-  streamMultiHash [hSHA256, hMD5] "http://mirror.internode.on.net/pub/test/100meg.test" "testFile" 
+-- Configure manager
+mkManagerSettings :: Int -> ManagerSettings
+mkManagerSettings chunkSize = tlsManagerSettings {
+  managerRawConnection = fmap ($ chunkSize) $ rawConnectionModifySocketSize (const $ return ()) 
+} 
 
 --download a binary file and produce a resumableSource
 --streams at variable chunk sizes
-streamMultiHash :: [Contextable] -> String -> FilePath -> IO ()
-streamMultiHash contexts url file = do
+streamMultiHash :: ManagerSettings -> [Contextable] -> String -> FilePath -> IO ()
+streamMultiHash managerSettings contexts url file = do
+  manager <- newManager managerSettings
   request <- parseRequest url 
-  --configure manager with chunksize 4096
-  let config = fmap (\f -> f 16536) $ rawConnectionModifySocketSize (const $ return())
-  manager <- newManager $ tlsManagerSettings { managerRawConnection = config }
-
   runResourceT $ do
     response <- http request manager 
     responseBody response $=+ hashC contexts $$+- sinkFile file 
-
 
 --get bs from upstream, update context, yield bs downstream
 --when all byte strings consumed, print the hash
@@ -72,4 +69,10 @@ testSource = do
   yield $ ByteS.pack "a"
   yield $ ByteS.pack "ab"
   yield $ ByteS.pack "abc"
+ 
+main = do
+--when rtsSupportsBoundThreads $ getNumProcessors >>= setNumCapabilities 
+  chunkSize <- fmap (!! 0) getArgs 
+  print chunkSize
+  streamMultiHash (mkManagerSettings (read chunkSize :: Int)) [hSHA256, hMD5] "http://mirror.internode.on.net/pub/test/100meg.test" "testFile" 
 
