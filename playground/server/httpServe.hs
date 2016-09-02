@@ -1,42 +1,38 @@
 --Server dependencies
-import Network.HTTP.Server
-import Network.HTTP.Headers
+
+import Codec.Binary.UTF8.String (encodeString)
+import Data.List (isPrefixOf)
+import Network.HTTP.Server as Server 
 import Network.HTTP.Client
+import Network.URI
 import System.FilePath
-import Text.XHtml
-import Codec.Binary.UTF8.String
 import System.IO
-import qualified Data.ByteString as ByteString
+import Text.XHtml
 
-main :: IO ()
+import StreamHash
 
-main = serverWith defaultConfig
-  $ \_ url request ->
-    --Append the HTTP reponse code
-    do
-        --Open a connection client manager to download files
-        clientManager <- newManager defaultManagerSettings
-        --make a test request
-        getTest <- parseRequest "httpbin.org/get"
-        withReponse getTest clientManager 
-        $ \response ->
-              do
-                  body <- responseBody response
-                  return $ brRead body
+-- mkManagerWithChunkSize :: Int -> ManagerSettings
+-- mkManagerWithChunkSize chunkSize = tlsManagerSettings {
+--     managerRawConnection = fmap ($ chunkSize) $ rawConnectionModifySocketSize (const $ return ())
+-- }
 
-        --Return some text to the user
-        return $ sendHTML OK
-        --Construct body of response
-        --Append </html> tag
-          $ body (toHtml "Text, no matter what the request is")
+sendHTML       :: StatusCode -> Html -> Server.Response String
+sendHTML s v    = insertHeader HdrContentType "text/html" $ sendText s (renderHtml v)
 
-sendHTML       :: StatusCode -> Html -> Response String
-sendHTML s v    = insertHeader HdrContentType "text/html"
-                $ sendText s (renderHtml v)
-
-sendText       :: StatusCode -> String -> Response String
-sendText s v    = insertHeader HdrContentLength (show (length txt))
+sendText       :: StatusCode -> String -> Server.Response String
+sendText s v    = insertHeader HdrContentLength (show (length $ encodeString v))
                 $ insertHeader HdrContentEncoding "UTF-8"
                 $ insertHeader HdrContentEncoding "text/plain"
-                $ (respond s :: Response String) { rspBody = txt }
-  where txt       = encodeString v
+                $ (respond s :: Server.Response String) { rspBody = encodeString v }
+
+main = serverWith defaultConfig 
+    $ \_ _ request ->
+        case rqMethod request of
+            GET -> do
+                
+                if isPrefixOf "?url" $ uriQuery $ rqURI request then
+                    parseURI uriQuery  
+                else
+                    return $ sendText NotFound $ reason NotFound
+            _ -> do
+                return $ sendText BadRequest $ reason BadRequest 
