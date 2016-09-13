@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ExistentialQuantification #-}
 
-module StreamHash (streamHash, Contextable, Digestable) where
+module StreamHash (streamHash, Contextable(..), Digestable(..)) where
 
 import Control.DeepSeq (NFData(..), force)
 import Control.Exception (catch)

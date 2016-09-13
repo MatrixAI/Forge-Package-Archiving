@@ -1,27 +1,57 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Data.ByteString.Lazy (ByteString(..), fromStrict)
-import Network.HTTP.Client (ManagerSettings(..), rawConnectionModifySocketSize)
-import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Network.Wai (Application(..), rawQueryString, requestMethod, responseLBS)
+import Crypto.Hash (hashInitWith, SHA256(..), MD5(..))
+import Control.Monad.Trans (liftIO)
+import Control.Monad.Trans.Resource (runResourceT)
+
+import Data.ByteString.Builder (stringUtf8)
+import Data.ByteString.Lazy (fromStrict)
+import Data.ByteString.Char8 (unpack)
+import Data.Maybe (fromMaybe)
+import Data.Conduit (yield, Flush(..), unwrapResumable)
+import Network.HTTP.Client (ManagerSettings(..), rawConnectionModifySocketSize,)
+import Network.HTTP.Conduit (parseRequest, newManager, tlsManagerSettings, http, responseBody)
+import Network.Wai (Application(..), queryString, rawQueryString, requestMethod, responseBuilder, responseLBS, responseHeaders)
 import Network.Wai.Handler.Warp (run)
+import Network.Wai.Conduit (sourceRequestBody, responseSource, responseRawSource)
 import Network.HTTP.Types.Method (methodGet)
-import Network.HTTP.Types.Status (status200)
+import Network.HTTP.Types.Status (status200, status404)
+import Network.HTTP.Types.URI (Query(..))
 
 import StreamHash
 
-mkManagerWithChunkSize :: Int -> ManagerSettings
-mkManagerWithChunkSize chunkSize = tlsManagerSettings {
-    managerRawConnection = fmap ($ chunkSize) $ rawConnectionModifySocketSize (const $ return ())
-}
+-- mkManagerWithChunkSize :: Int -> ManagerSettings
+-- mkManagerWithChunkSize chunkSize = tlsManagerSettings {
+--     managerRawConnection = fmap ($ chunkSize) $ rawConnectionModifySocketSize (const $ return ())
+-- }
 
-serverApp :: Application
-serverApp req doResponse = do
-    case requestMethod req of
-        methodGet -> do
-            let response = responseLBS status200 [] $ fromStrict $ rawQueryString $ req 
-            doResponse response
+-- serverApp :: Application
+-- serverApp req doResponse = do
+--     case requestMethod req of
+--         methodGet -> do
+--             let mURL = fromMaybe Nothing $ lookup "url" $ queryString req
+--             case mURL of 
+--                 Nothing -> doResponse $ responseLBS status404 [] $ "No url found in query string"
+--                 Just url -> do
+--                     -- let settings = mkManagerWithChunkSize 8192 
+--                     -- let hashes = [Contextable (hashInitWith SHA256), Contextable (hashInitWith MD5)]
+--                     let stringURL = unpack url
+--                     -- streamHash settings hashes stringURL "out" 
+--                     dmgr <- newManager tlsManagerSettings
+--                     pkgreq <- parseRequest stringURL
+--                     response <- http request manager
+--                     let sourceReq = sourceRequestBody req                  
+--                     doResponse $ responseLBS status404 [] $ "No url found in query string"
+
+serverAppTest :: Application
+serverAppTest req responder = do
+    dmgr <- newManager tlsManagerSettings
+    pkgreq <- parseRequest "http://httpbin.org/get"
+    runResourceT $ do
+        pkgRequestSource <-  $ http pkgreq dmgr
+        liftIO $ responder $ responseSource status200 [] (yield $ Chunk $ stringUtf8 "Hello") 
+
 
 main :: IO ()
 main = do
-    run 8000 serverApp
+    run 8000 serverAppTest
