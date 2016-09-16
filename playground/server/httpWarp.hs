@@ -1,15 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Crypto.Hash (hashInitWith, SHA256(..), MD5(..))
+
+import Control.Exception (bracket)
 import Control.Monad.Trans (liftIO)
 import Control.Monad.Trans.Resource (runResourceT)
 
-import Data.ByteString.Builder (stringUtf8)
+import Data.ByteString.Builder (stringUtf8, byteString)
 import Data.ByteString.Lazy (fromStrict)
 import Data.ByteString.Char8 (unpack)
 import Data.Maybe (fromMaybe)
-import Data.Conduit (yield, Flush(..), unwrapResumable)
-import Network.HTTP.Client (ManagerSettings(..), rawConnectionModifySocketSize,)
+import Data.Conduit (await, yield, Flush(..), unwrapResumable, Conduit, (=$=))
+-- import Network.HTTP.Client (ManagerSettings(..), rawConnectionModifySocketSize,)
 import Network.HTTP.Conduit (parseRequest, newManager, tlsManagerSettings, http, responseBody)
 import Network.Wai (Application(..), queryString, rawQueryString, requestMethod, responseBuilder, responseLBS, responseHeaders)
 import Network.Wai.Handler.Warp (run)
@@ -19,6 +21,7 @@ import Network.HTTP.Types.Status (status200, status404)
 import Network.HTTP.Types.URI (Query(..))
 
 import StreamHash
+import Data.Typeable
 
 -- mkManagerWithChunkSize :: Int -> ManagerSettings
 -- mkManagerWithChunkSize chunkSize = tlsManagerSettings {
@@ -43,15 +46,29 @@ import StreamHash
 --                     let sourceReq = sourceRequestBody req                  
 --                     doResponse $ responseLBS status404 [] $ "No url found in query string"
 
-serverAppTest :: Application
-serverAppTest req responder = do
-    dmgr <- newManager tlsManagerSettings
-    pkgreq <- parseRequest "http://httpbin.org/get"
-    runResourceT $ do
-        pkgRequestSource <-  $ http pkgreq dmgr
-        liftIO $ responder $ responseSource status200 [] (yield $ Chunk $ stringUtf8 "Hello") 
 
+byteStringToBuilder = do 
+     mbs <- await
+     case mbs of
+         Just bs -> do
+             yield $ Chunk $ byteString $ bs
+             byteStringToBuilder
+         Nothing -> do
+             yield $ Flush
+
+serverApp :: Application
+serverApp req responder = do
+    pkgreq <- parseRequest "http://httpbin.org/get"
+    print req
+    dmgr <- newManager tlsManagerSettings
+
+    runResourceT $ do
+        pkg <- http pkgreq dmgr
+        (packageSource, _) <- unwrapResumable $ responseBody $ pkg
+        liftIO $ print $ typeOf packageSource
+        -- liftIO $ responder $ responseSource status200 [] (reqSource =$= byteStringToBuilder) 
+        liftIO $ responder $ responseSource status200 [] (yield $ Chunk $ stringUtf8 $ "Hello")
 
 main :: IO ()
 main = do
-    run 8000 serverAppTest
+    run 8000 serverApp
