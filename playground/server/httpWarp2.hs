@@ -12,13 +12,13 @@ import qualified Data.Conduit.List as CL
 import Data.Maybe (fromMaybe)
 import Data.Typeable
 
-import Network.HTTP.Conduit (parseRequest, newManager, Manager(..), tlsManagerSettings, http, responseBody, Response(..))
+import Network.HTTP.Conduit (parseRequest, newManager, Manager(..), tlsManagerSettings, http, responseBody, Response(..), HttpException(..), HttpExceptionContent(..))
 import Network.Wai (Application(..), responseStream, responseLBS, queryString, requestMethod)
 import Network.Wai.Handler.Warp (run, runSettings, Settings(..), defaultSettings, exceptionResponseForDebug, setOnExceptionResponse, setOnException)
-import Network.HTTP.Types (status200, status404)
+import Network.HTTP.Types (status200, status404, status500)
 
 import Control.DeepSeq (NFData(..), force)
-import Control.Exception (catch, SomeException)
+import Control.Exception (catch, SomeException, throw)
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
@@ -95,13 +95,21 @@ app req respond = do
             let mURL = fromMaybe Nothing $ lookup "url" $ queryString req
             case mURL of
                 Nothing -> respond $ responseLBS status404 [] $ "No url found in query string"
-                Just url -> do
-                    respond $ responseStream status200 [] $ \write flush -> runResourceT $ do
-                        
-                        downloadRequest <- liftIO $ parseRequest $ BS.unpack url
-                        downloadManager <- liftIO $ newManager tlsManagerSettings        
-                        package <- http downloadRequest downloadManager
-                        (packageSource, _) <- unwrapResumable $ responseBody $ package
+                Just url -> runResourceT $ do
+
+                    downloadRequest <- liftIO $ parseRequest $ BS.unpack url
+                    downloadManager <- liftIO $ newManager tlsManagerSettings        
+                    
+                    let respondException = \ex -> case ex of
+                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> return Nothing
+                         otherwise -> throw ex
+
+                    package <- liftIO $ (fmap Just $ http downloadRequest downloadManager) `catch` respondException
+
+                     
+                    (packageSource, _) <- unwrapResumable $ responseBody $ package
+
+                    liftIO $ respond $ responseStream status200 [] $ \write flush -> runResourceT $ do
                         let sinkToClient = CL.mapM_ (\bs -> liftIO $ write (byteString bs) >> flush)
 
                         chan <- liftIO $ atomically $ newBroadcastTBMChan 16
@@ -130,5 +138,5 @@ testExceptions _ e = TIO.hPutStrLn stdout $ T.pack $ show e
 main :: IO ()
 main = do
     --let settings = setOnException testExceptions defaultSettings
-    --let settings = defaultSettings { settingsOnExceptionResponse = exceptionResponseForDebug }
+    --let settings = defaultSettings { setOnExceptionResponse = exceptionResponseForDebug }
     runSettings defaultSettings app

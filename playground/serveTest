@@ -1,0 +1,8 @@
+#!/bin/bash 
+socat -d -d -v TCP-LISTEN:80,crlf,reuseaddr,fork SYSTEM:"
+	echo HTTP/1.1 200 OK;
+       	echo Content-Type\: text/plain;
+	echo Content-Length\: 10;
+       	echo;
+       	curl 'https://d3g5gsiof5omrk.cloudfront.net/nixos/16.09/nixos-16.09.741.354fd37/nixos-minimal-16.09.741.354fd37-x86_64-linux.iso' &
+	sleep 3s && kill %1 && exit 1;"
