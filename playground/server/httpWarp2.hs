@@ -94,22 +94,20 @@ app req respond = do
         methodGet -> do
             let mURL = fromMaybe Nothing $ lookup "url" $ queryString req
             case mURL of
-                Nothing -> respond $ responseLBS status404 [] $ "No url found in query string"
+                Nothing -> respond $ responseLBS status404 [] $ "couldn't parse url"
                 Just url -> runResourceT $ do
 
                     downloadRequest <- liftIO $ parseRequest $ BS.unpack url
                     downloadManager <- liftIO $ newManager tlsManagerSettings        
-                    
-                    let respondException = \ex -> case ex of
-                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> return Nothing
-                         otherwise -> throw ex
-
-                    package <- liftIO $ (fmap Just $ http downloadRequest downloadManager) `catch` respondException
-
-                     
+  
+                    package <- http downloadRequest downloadManager 
                     (packageSource, _) <- unwrapResumable $ responseBody $ package
+                   
+                    let respondException = \ex -> case ex of
+                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> (respond $ responseLBS status500 [] $ "the response body was too short") >> return () 
+                         otherwise -> throw ex >> return ()
 
-                    liftIO $ respond $ responseStream status200 [] $ \write flush -> runResourceT $ do
+                    let responder = \write flush -> runResourceT $ do
                         let sinkToClient = CL.mapM_ (\bs -> liftIO $ write (byteString bs) >> flush)
 
                         chan <- liftIO $ atomically $ newBroadcastTBMChan 16
@@ -122,19 +120,22 @@ app req respond = do
                         -- waiting  on two child sinks to complete
                         (_,_) <- liftIO $ concurrently 
                             (catch (runResourceT $ (sourceTBMChan chanR1) $$& sinkToClient)
-                                (\e -> print ("line 94:" ++ show (e :: SomeException)) >> return ())
+                                (\e -> print ("conduit error streaming to client" ++ show (e :: SomeException)) >> return ())
                             )
                             (catch (runResourceT $ (sourceTBMChan chanR2) =$=& hashC contexts $$& sinkFile "assets/testfile")
-                                (\e -> print ("line 97:" ++ show (e :: SomeException)) >> return ())
+                                (\e -> print ("conduit error streaming to hash server" ++ show (e :: SomeException)) >> return ())
                                 )
 
                         return ()
-                        
+
+                    liftIO $ respond $ responseStream status200 [] $ catch responder resp
+
+                    liftIO $ closeManager downloadManager
+                       
                         -- TODO FURTHER: have the app handle routing, so that we have two modes, a query mode and a binary download mode, and permalinks
                         --packageSource $=+ hashC contexts $$+- sinkToClient
                         --
-testExceptions _ e = TIO.hPutStrLn stdout $ T.pack $ show e
-
+                        --
 main :: IO ()
 main = do
     --let settings = setOnException testExceptions defaultSettings
