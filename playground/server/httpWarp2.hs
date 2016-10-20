@@ -12,7 +12,7 @@ import qualified Data.Conduit.List as CL
 import Data.Maybe (fromMaybe)
 import Data.Typeable
 
-import Network.HTTP.Conduit (parseRequest, newManager, Manager(..), tlsManagerSettings, http, responseBody, Response(..), HttpException(..), HttpExceptionContent(..))
+import Network.HTTP.Conduit (parseRequest, newManager, Manager(..), tlsManagerSettings, http, responseBody, Response(..), HttpException(..), HttpExceptionContent(..), closeManager)
 import Network.Wai (Application(..), responseStream, responseLBS, queryString, requestMethod)
 import Network.Wai.Handler.Warp (run, runSettings, Settings(..), defaultSettings, exceptionResponseForDebug, setOnExceptionResponse, setOnException)
 import Network.HTTP.Types (status200, status404, status500)
@@ -94,7 +94,8 @@ app req respond = do
         methodGet -> do
             let mURL = fromMaybe Nothing $ lookup "url" $ queryString req
             case mURL of
-                Nothing -> respond $ responseLBS status404 [] $ "couldn't parse url"
+                Nothing -> runResourceT $ do
+                    liftIO $ respond $ responseLBS status404 [] $ "couldn't parse url"
                 Just url -> runResourceT $ do
 
                     downloadRequest <- liftIO $ parseRequest $ BS.unpack url
@@ -103,11 +104,18 @@ app req respond = do
                     package <- http downloadRequest downloadManager 
                     (packageSource, _) <- unwrapResumable $ responseBody $ package
                    
+                    --respondException :: SomeException -> Response
                     let respondException = \ex -> case ex of
-                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> (respond $ responseLBS status500 [] $ "the response body was too short") >> return () 
-                         otherwise -> throw ex >> return ()
+                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> (responseLBS status500 [] $ "the response body was too short") 
+                         otherwise -> throw ex 
 
-                    let responder = \write flush -> runResourceT $ do
+                    --responder :: Response
+                    --responseStream :: Status -> ResponseHeaders -> StreamingBody -> Response
+                    --StreamingBody :: (Builder -> IO ()) -> IO () -> IO ()
+                    --Represents a streaming HTTP response body. It's a function of two parameters; 
+                    --the first parameter provides a means of sending another chunk of data,
+                    --and the second parameter provides a means of flushing the data to the client.
+                    let responder = responseStream status200 [] $ \write flush -> runResourceT $ do
                         let sinkToClient = CL.mapM_ (\bs -> liftIO $ write (byteString bs) >> flush)
 
                         chan <- liftIO $ atomically $ newBroadcastTBMChan 16
@@ -128,16 +136,11 @@ app req respond = do
 
                         return ()
 
-                    liftIO $ respond $ responseStream status200 [] $ catch responder resp
+                    liftIO $ respond $ responder
 
-                    liftIO $ closeManager downloadManager
                        
                         -- TODO FURTHER: have the app handle routing, so that we have two modes, a query mode and a binary download mode, and permalinks
                         --packageSource $=+ hashC contexts $$+- sinkToClient
-                        --
-                        --
 main :: IO ()
 main = do
-    --let settings = setOnException testExceptions defaultSettings
-    --let settings = defaultSettings { setOnExceptionResponse = exceptionResponseForDebug }
     runSettings defaultSettings app
