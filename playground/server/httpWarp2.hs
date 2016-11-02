@@ -105,8 +105,11 @@ app req respond = do
                     (packageSource, _) <- unwrapResumable $ responseBody $ package
                    
                     --respondException :: SomeException -> Response
+                    --this is used to send trailing headers in the event that the size of the response body
+                    --does not match the hash of the response body or does not match the content size specified
+                    --in the header of the upstream file transmission.
                     let respondException = \ex -> case ex of
-                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> (responseLBS status500 [] $ "the response body was too short") 
+                         HttpExceptionRequest _ (ResponseBodyTooShort _ _ ) -> ("the response body was too short") 
                          otherwise -> throw ex 
 
                     --responder :: Response
@@ -128,10 +131,10 @@ app req respond = do
                         -- waiting  on two child sinks to complete
                         (_,_) <- liftIO $ concurrently 
                             (catch (runResourceT $ (sourceTBMChan chanR1) $$& sinkToClient)
-                                (\e -> print ("conduit error streaming to client" ++ show (e :: SomeException)) >> return ())
+                                (\e -> print ("streaming to client: " ++ show (e :: SomeException)) >> return ())
                             )
                             (catch (runResourceT $ (sourceTBMChan chanR2) =$=& hashC contexts $$& sinkFile "assets/testfile")
-                                (\e -> print ("conduit error streaming to hash server" ++ show (e :: SomeException)) >> return ())
+                                (\e -> print ("streaming to hash server: " ++ show (e :: SomeException)) >> return ())
                                 )
 
                         return ()
