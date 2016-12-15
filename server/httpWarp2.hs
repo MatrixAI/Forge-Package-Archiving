@@ -2,66 +2,53 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+import Control.Concurrent (forkIO)
+import Control.Concurrent.Async (concurrently)
+import Control.Concurrent.STM
+import Control.Concurrent.STM.TBMChan (TBMChan(..))
+import Control.Concurrent.STM.TChan (newBroadcastTChan, dupTChan)
+import Control.Concurrent.STM.TMChan (dupTMChan, newBroadcastTMChan)
+import Control.Concurrent.STM.TVar (TVar(..), newTVar)
+import Control.DeepSeq (NFData(..), force)
+import Control.Exception (bracket, catch, SomeException, throw)
+import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
+import Control.Parallel.Strategies (parMap, rpar, rseq, rdeepseq)
+
+import Crypto.Hash (hashInitWith, HashAlgorithm, Digest(..), Context(..), hashUpdate, hashFinalize, SHA256(..), MD5(..))
+
 import Data.ByteString.Builder (byteString)
-import qualified Data.ByteString.Char8 as BS (unpack, pack, length, ByteString(..))
-
 import Data.Conduit (unwrapResumable, yield, await, Conduit, ResumableSource, ($$), (=$=))
+import Data.Conduit.Async (($$&), (=$=&))
 import Data.Conduit.Binary (sinkFile)
-import qualified Data.Conduit.List as CL
-
+import Data.Conduit.TMChan (sinkTBMChan, sourceTBMChan)
 import Data.Maybe (fromMaybe)
 import Data.Typeable
 
 import Network.HTTP.Conduit (parseRequest, newManager, Manager(..), tlsManagerSettings, http, responseBody, Response(..), HttpException(..), HttpExceptionContent(..), closeManager)
+import Network.HTTP.Types (status200, status404, status500)
 import Network.Wai (Application(..), responseStream, responseLBS, queryString, requestMethod)
 import Network.Wai.Handler.Warp (run, runSettings, Settings(..), defaultSettings, exceptionResponseForDebug, setOnExceptionResponse, setOnException)
-import Network.HTTP.Types (status200, status404, status500)
 
-import Control.DeepSeq (NFData(..), force)
-import Control.Exception (catch, SomeException, throw)
+import System.IO (stdout, stderr)
 
-import Control.Monad (when)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Resource (runResourceT, ResourceT(..))
-import Control.Monad.Trans.Class (lift)
-
-import Control.Parallel.Strategies (parMap, rpar, rseq, rdeepseq)
-
-import Crypto.Hash (hashInitWith, HashAlgorithm, Digest(..), Context(..), hashUpdate, hashFinalize, 
-  SHA256(..), MD5(..))
-
-import Control.Concurrent (forkIO)
-import Control.Concurrent.STM
-import Control.Concurrent.STM.TVar (TVar(..), newTVar)
-import Control.Concurrent.STM.TChan (newBroadcastTChan, dupTChan)
-import Control.Concurrent.STM.TBMChan (TBMChan(..))
-import Control.Concurrent.STM.TMChan (dupTMChan, newBroadcastTMChan)
-import Control.Concurrent.Async (concurrently)
-import Control.Exception (bracket)
-import Data.Conduit.TMChan (sinkTBMChan, sourceTBMChan)
-import Data.Conduit.Async (($$&), (=$=&))
-
+import qualified Data.ByteString.Char8 as BS (unpack, pack, length, ByteString(..))
+import qualified Data.Conduit.List as CL
 import qualified Data.Text.IO as TIO
 import qualified Data.Text as T
 
-import System.IO (stdout, stderr)
--- quick data class to pack instances of context and digest into
+--need to pack types of (Context/Digest h) into a data type (Contextable/Digestable)
 data Contextable = forall h. (HashAlgorithm h) => Contextable (Context h) 
 instance NFData Contextable where rnf (Contextable ctx) = rnf ctx 
 data Digestable = forall h. (HashAlgorithm h) => Digestable (Digest h)
 
+--make a list of all the hashes we might need to produce from our stream, called "contexts"
 contexts :: [Contextable]
 contexts = [Contextable (hashInitWith SHA256), Contextable (hashInitWith MD5)]
 
---download a binary file and produce a resumableSource
---streams at variable chunk sizes
--- streamHash :: ResumableSource (ResourceT IO) BS.ByteString -> [Contextable] -> FilePath -> IO ()
--- streamHash src contexts out = do
---     runResourceT $ do
---         src $=+ hashC contexts $$+- sinkFile out 
-
---get bs from upstream, update context, yield bs downstream
---when all byte strings consumed, print the hash
+--hashC: Conduit that, given a list of packed contexts, returns a conduit that will process a stream of bytestrings and return hash values to be written into multikey index
 hashC :: [Contextable] -> Conduit BS.ByteString (ResourceT IO) (BS.ByteString)
 hashC !ctxlist = do
   mbs <- await
@@ -75,6 +62,7 @@ hashC !ctxlist = do
       -- TODO: instead of printing hash values, write hash info to multikey index along with file information
       liftIO $ print $ map (\(Digestable digest) -> show digest) $ digestable
 
+--newBroadcastTBMChan: broadcast bounded memory channel. Needed because functionality not included in STM Library
 newBroadcastTBMChan :: Int -> STM (TBMChan a)
 newBroadcastTBMChan n = do
     closed <- newTVar False
@@ -125,10 +113,10 @@ app req respond = do
                         chanR1 <- liftIO $ atomically $ dupTBMChan chan
                         chanR2 <- liftIO $ atomically $ dupTBMChan chan
 
-                        -- the underlying TBMChan closes when the sink closes
+                        --the underlying conduit which downloads the package and writes it into broadcast channel as a sink
                         sourceID <- liftIO . forkIO . runResourceT $ packageSource $$& sinkTBMChan chan True
 
-                        -- waiting  on two child sinks to complete
+                        --start two threaded conduits that are responsible for sending the package data to the client and hashing the client information
                         (_,_) <- liftIO $ concurrently 
                             (catch (runResourceT $ (sourceTBMChan chanR1) $$& sinkToClient)
                                 (\e -> print ("streaming to client: " ++ show (e :: SomeException)) >> return ())
